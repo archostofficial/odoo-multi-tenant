@@ -1,0 +1,29 @@
+version: '3'
+services:
+  odoo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8069:8069"
+      - "8071:8071"
+      - "8072:8072"
+    volumes:
+      - odoo-data:/var/lib/odoo
+      - /opt/odoo-addons/shared:/mnt/shared-addons
+      - /opt/odoo-addons/tenant-specific/main:/mnt/extra-addons
+    environment:
+      - HOST=192.168.60.110
+      - PORT=5432
+      - USER=odoo
+      - PASSWORD=cnV2abjbDpbh64e12987wR4mj5kQ3456Y0Qf
+      - DB_NAME=odoo
+      - VIRTUAL_HOST=arcweb.com.au
+      - VIRTUAL_PORT=8069
+      - PGSSLMODE=prefer
+      - DB_MAXCONN=64
+    command: ["odoo", "--without-demo=all", "--workers=2", "--proxy-mode"]
+    restart: always
+
+volumes:
+  odoo-data:
