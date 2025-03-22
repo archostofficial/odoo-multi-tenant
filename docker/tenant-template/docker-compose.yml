@@ -1,1 +1,33 @@
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
 
+# TENANT_NAME Odoo server
+upstream odoo_TENANT_NAME {
+   server 127.0.0.1:PORT_NUMBER;
+}
+upstream odoochat_TENANT_NAME {
+   server 127.0.0.1:CHAT_PORT;
+}
+
+# HTTP redirect to HTTPS
+server {
+   listen 80;
+   server_name TENANT_NAME.arcweb.com.au;
+   
+   # Redirect to HTTPS
+   return 301 https://$host$request_uri;
+}
+
+# TENANT_NAME tenant (TENANT_NAME.arcweb.com.au)
+server {
+   listen 443 ssl http2;
+   server_name TENANT_NAME.arcweb.com.au;
+
+   ssl_certificate /etc/letsencrypt/live/arcweb.com.au/fullchain.pem;
+   ssl_certificate_key /etc/letsencrypt/live/arcweb.com.au/privkey.pem;
+
+   # log
+   access_log /var/log/nginx/TENANT_NAME.arcweb.com.au.access.log;
+   error_log /var/log/nginx/TENANT_
