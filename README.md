@@ -24,7 +24,7 @@ This repository contains all the necessary configurations and scripts to set up 
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/odoo-multi-tenant.git
+   git clone https://github.com/archostofficial/odoo-multi-tenant.git
    cd odoo-multi-tenant
    ```
 
