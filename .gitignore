@@ -1,0 +1,83 @@
+# Environment files
+.env
+*.env
+!.env.template
+
+# PostgreSQL data
+pgdata/
+
+# Odoo data
+odoo-data/
+odoo-web-data/
+/data/
+
+# Backup files
+/backups/
+*.backup
+*.dump
+*.sql
+*.gz
+*.zip
+*.tar.gz
+
+# Log files
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Docker
+.docker/
+
+# System Files
+.DS_Store
+Thumbs.db
+.directory
+desktop.ini
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Temporary files
+*~
+*.swp
+*.swo
+.tmp/
+tmp/
+
+# Addon repositories
+/enterprise/
+/odoo-addons/enterprise/
+/odoo-addons/*/
+!/odoo-addons/shared/
+!/odoo-addons/tenant-specific/
+
+# SSL certificates
+*.pem
+*.key
+*.crt
