@@ -31,6 +31,11 @@ ADDONS_DIR="${BASE_DIR}/odoo-addons"
 SCRIPTS_DIR="${BASE_DIR}/scripts"
 ENTERPRISE_DIR="${ADDONS_DIR}/enterprise"
 
+# Global variables for SSL
+DOMAIN="arcweb.com.au"
+USE_WILDCARD=false
+SSL_EMAIL=""
+
 # Create environment variables template
 create_env_template() {
     echo -e "${GREEN}Creating environment variables template...${NC}"
@@ -298,6 +303,110 @@ install_tenant_scripts() {
     echo -e "${GREEN}Tenant management scripts installed.${NC}"
 }
 
+# Create self-signed certificates for development
+create_self_signed_cert() {
+    echo -e "${GREEN}Creating self-signed certificate for $DOMAIN...${NC}"
+    
+    # Create directory for certificates if it doesn't exist
+    mkdir -p /etc/letsencrypt/live/$DOMAIN
+    
+    # Generate a self-signed certificate
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+      -keyout /etc/letsencrypt/live/$DOMAIN/privkey.pem \
+      -out /etc/letsencrypt/live/$DOMAIN/fullchain.pem \
+      -subj "/CN=$DOMAIN/O=Odoo/C=US" \
+      -addext "subjectAltName = DNS:$DOMAIN,DNS:*.$DOMAIN,DNS:www.$DOMAIN"
+    
+    echo -e "${YELLOW}Self-signed certificate created. This is only for development/testing environments.${NC}"
+    echo -e "${YELLOW}For production, you should replace these with Let's Encrypt certificates later.${NC}"
+}
+
+# Set up SSL certificates
+setup_ssl() {
+    echo -e "${GREEN}Setting up SSL certificates...${NC}"
+    
+    # Prompt for domain
+    echo -e "${BLUE}Please enter your main domain name (e.g., arcweb.com.au):${NC}"
+    read domain_input
+    
+    if [ -n "$domain_input" ]; then
+        DOMAIN=$domain_input
+    fi
+    
+    echo -e "${BLUE}Please select SSL setup option:${NC}"
+    echo "1. Let's Encrypt certificates (requires domain control and public access)"
+    echo "2. Self-signed certificates (for testing/development only)"
+    echo "3. Skip SSL setup for now (you'll need to configure SSL later)"
+    read -p "Enter your choice [1-3]: " ssl_choice
+    
+    case $ssl_choice in
+        1)
+            # Check if certbot is installed
+            if ! command -v certbot >/dev/null 2>&1; then
+                echo -e "${YELLOW}Certbot not found. Installing...${NC}"
+                apt-get update
+                apt-get install -y certbot python3-certbot-nginx
+            fi
+            
+            # Ask if wildcard certificate is needed
+            echo -e "${BLUE}Do you want to generate a wildcard certificate for *.$DOMAIN? [y/N]${NC}"
+            read wildcard
+            
+            if [[ "$wildcard" == "y" || "$wildcard" == "Y" ]]; then
+                USE_WILDCARD=true
+                echo -e "${BLUE}Please enter your email for Let's Encrypt notifications:${NC}"
+                read email
+                
+                if [ -z "$email" ]; then
+                    echo -e "${RED}Email cannot be empty.${NC}"
+                    return 1
+                fi
+                
+                SSL_EMAIL=$email
+                
+                certbot certonly --manual --preferred-challenges dns \
+                  -d $DOMAIN -d *.$DOMAIN \
+                  --agree-tos -m $SSL_EMAIL
+                  
+                echo -e "${YELLOW}Please follow the instructions from certbot to complete DNS challenge.${NC}"
+            else
+                echo -e "${BLUE}Please enter your email for Let's Encrypt notifications:${NC}"
+                read email
+                
+                if [ -z "$email" ]; then
+                    echo -e "${RED}Email cannot be empty.${NC}"
+                    return 1
+                fi
+                
+                SSL_EMAIL=$email
+                
+                certbot certonly --standalone -d $DOMAIN -d www.$DOMAIN \
+                  --agree-tos -m $SSL_EMAIL
+            fi
+            
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}SSL certificates obtained successfully.${NC}"
+            else
+                echo -e "${RED}Failed to obtain SSL certificates.${NC}"
+                echo -e "${YELLOW}Creating self-signed certificates for now...${NC}"
+                create_self_signed_cert
+            fi
+            ;;
+        2)
+            create_self_signed_cert
+            ;;
+        3)
+            echo -e "${YELLOW}Skipping SSL setup. You'll need to configure SSL later.${NC}"
+            echo -e "${YELLOW}Creating temporary self-signed certificate to avoid Nginx errors...${NC}"
+            create_self_signed_cert
+            ;;
+        *)
+            echo -e "${RED}Invalid choice. Creating self-signed certificates...${NC}"
+            create_self_signed_cert
+            ;;
+    esac
+}
+
 # Configure Nginx
 configure_nginx() {
     echo -e "${GREEN}Configuring Nginx...${NC}"
@@ -313,12 +422,25 @@ configure_nginx() {
     mkdir -p /etc/nginx/sites-available
     mkdir -p /etc/nginx/sites-enabled
     
+    # Copy the main Nginx config
     cp nginx/nginx.conf /etc/nginx/
-    cp nginx/sites-available/arcweb.com.au.conf /etc/nginx/sites-available/
-    cp nginx/sites-available/tenant-template.conf /etc/nginx/sites-available/
     
-    # Create symbolic link
-    ln -sf /etc/nginx/sites-available/arcweb.com.au.conf /etc/nginx/sites-enabled/
+    # Prepare site configs - replace domain if needed
+    cp nginx/sites-available/arcweb.com.au.conf /tmp/main-site.conf
+    cp nginx/sites-available/tenant-template.conf /tmp/tenant-template.conf
+    
+    # Replace domain if it's not the default
+    if [ "$DOMAIN" != "arcweb.com.au" ]; then
+        sed -i "s/arcweb.com.au/$DOMAIN/g" /tmp/main-site.conf
+        sed -i "s/arcweb.com.au/$DOMAIN/g" /tmp/tenant-template.conf
+    fi
+    
+    # Copy the modified configs to their destinations
+    cp /tmp/main-site.conf /etc/nginx/sites-available/$DOMAIN.conf
+    cp /tmp/tenant-template.conf /etc/nginx/sites-available/tenant-template.conf
+    
+    # Create symbolic link for the main site
+    ln -sf /etc/nginx/sites-available/$DOMAIN.conf /etc/nginx/sites-enabled/
     
     # Test Nginx configuration
     nginx -t
@@ -329,55 +451,7 @@ configure_nginx() {
         echo -e "${GREEN}Nginx configured and reloaded.${NC}"
     else
         echo -e "${RED}Nginx configuration test failed. Please check your configuration.${NC}"
-    fi
-}
-
-# Set up SSL certificates
-setup_ssl() {
-    echo -e "${GREEN}Setting up SSL certificates...${NC}"
-    
-    # Check if certbot is installed
-    if ! command -v certbot >/dev/null 2>&1; then
-        echo -e "${YELLOW}Certbot not found. Installing...${NC}"
-        apt-get update
-        apt-get install -y certbot python3-certbot-nginx
-    fi
-    
-    # Prompt for domain
-    echo -e "${BLUE}Please enter your main domain name (e.g., arcweb.com.au):${NC}"
-    read domain
-    
-    if [ -z "$domain" ]; then
-        echo -e "${RED}Domain name cannot be empty. Using default 'arcweb.com.au'${NC}"
-        domain="arcweb.com.au"
-    fi
-    
-    # Ask if wildcard certificate is needed
-    echo -e "${BLUE}Do you want to generate a wildcard certificate for *.$domain? [y/N]${NC}"
-    read wildcard
-    
-    if [[ "$wildcard" == "y" || "$wildcard" == "Y" ]]; then
-        echo -e "${BLUE}Please enter your email for Let's Encrypt notifications:${NC}"
-        read email
-        
-        if [ -z "$email" ]; then
-            echo -e "${RED}Email cannot be empty.${NC}"
-            return 1
-        fi
-        
-        certbot certonly --manual --preferred-challenges dns \
-          -d $domain -d *.$domain \
-          --agree-tos -m $email
-          
-        echo -e "${YELLOW}Please follow the instructions from certbot to complete DNS challenge.${NC}"
-    else
-        certbot --nginx -d $domain -d www.$domain
-    fi
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}SSL certificates obtained successfully.${NC}"
-    else
-        echo -e "${RED}Failed to obtain SSL certificates.${NC}"
+        echo -e "${YELLOW}You may need to fix the SSL certificate paths in the Nginx configuration.${NC}"
     fi
 }
 
@@ -392,6 +466,11 @@ start_main_instance() {
         echo -e "${YELLOW}Docker-compose not found. Installing...${NC}"
         apt-get update
         apt-get install -y docker-compose
+    fi
+    
+    # Update the domain in docker-compose.yml if needed
+    if [ "$DOMAIN" != "arcweb.com.au" ]; then
+        sed -i "s/VIRTUAL_HOST=arcweb.com.au/VIRTUAL_HOST=$DOMAIN/g" docker-compose.yml
     fi
     
     # Start container
@@ -413,8 +492,8 @@ install_all() {
     create_env_template
     install_enterprise_script
     install_tenant_scripts
-    configure_nginx
-    setup_ssl
+    setup_ssl             # Setup SSL certificates BEFORE Nginx
+    configure_nginx       # Now configure Nginx
     start_main_instance
     
     echo -e "${GREEN}Installation completed!${NC}"
@@ -422,7 +501,13 @@ install_all() {
     echo -e "1. Copy ${ODOO_DIR}/.env.template to ${ODOO_DIR}/.env and update with your secure values"
     echo -e "2. Create your first tenant with: ${SCRIPTS_DIR}/create-tenant.sh tenant_name database_name"
     echo -e "3. To install enterprise modules for a tenant: ${SCRIPTS_DIR}/install-enterprise.sh tenant_name"
-    echo -e "4. Access your main Odoo instance at: https://your-domain.com"
+    echo -e "4. Access your main Odoo instance at: https://$DOMAIN"
+    
+    if [[ "$ssl_choice" == "2" || "$ssl_choice" == "3" ]]; then
+        echo -e "${YELLOW}NOTE: You're using self-signed certificates. For production use, you should:${NC}"
+        echo -e "${YELLOW}  - Set up proper Let's Encrypt certificates${NC}"
+        echo -e "${YELLOW}  - Update the certificate paths in Nginx configuration${NC}"
+    fi
 }
 
 # Display menu
@@ -441,7 +526,15 @@ show_menu() {
     case $choice in
         1) install_all ;;
         2) create_directories ;;
-        3) configure_nginx ;;
+        3) 
+           # Ask if SSL is already set up
+           echo -e "${BLUE}Is SSL already set up? [y/N]${NC}"
+           read ssl_ready
+           if [[ "$ssl_ready" != "y" && "$ssl_ready" != "Y" ]]; then
+               setup_ssl
+           fi
+           configure_nginx 
+           ;;
         4) setup_ssl ;;
         5) start_main_instance ;;
         6) install_enterprise_script ;;
