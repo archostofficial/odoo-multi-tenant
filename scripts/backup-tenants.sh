@@ -71,3 +71,26 @@ tar -czf "$BACKUP_DIR.tar.gz" "$BACKUP_DIR"
 
 echo "Backup completed at $BACKUP_DIR"
 echo "Compressed archive available at $BACKUP_DIR.tar.gz"
+
+# Add retention policy to delete backups older than 7 days (or configured value)
+RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+echo "Applying backup retention policy: keeping backups for $RETENTION_DAYS days"
+
+# Find and delete backups older than retention period
+find /opt/backups/ -name "*.tar.gz" -type f -mtime +$RETENTION_DAYS -delete
+find /opt/backups/ -type d -empty -mtime +$RETENTION_DAYS -delete
+
+# Verify the most recent backup
+LATEST_BACKUP=$(ls -t /opt/backups/*.tar.gz | head -1)
+if [ -n "$LATEST_BACKUP" ]; then
+    echo "Verifying latest backup: $LATEST_BACKUP"
+    if tar -tzf "$LATEST_BACKUP" > /dev/null 2>&1; then
+        echo "Backup verification successful"
+    else
+        echo "ERROR: Backup verification failed for $LATEST_BACKUP"
+        # Send notification about failed backup
+    fi
+else
+    echo "WARNING: No backup files found!"
+fi
+
