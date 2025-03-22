@@ -1,33 +1,38 @@
-map $http_upgrade $connection_upgrade {
-  default upgrade;
-  ''      close;
-}
+version: '3'
+services:
+  odoo-TENANT_NAME:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "PORT_NUMBER:8069"
+      - "HTTPS_PORT:8071"
+      - "CHAT_PORT:8072"
+    volumes:
+      - odoo-TENANT_NAME-data:/var/lib/odoo
+      - /opt/odoo-addons/shared:/mnt/shared-addons
+      - /opt/odoo-addons/tenant-specific/TENANT_NAME:/mnt/extra-addons
+    environment:
+      - HOST=${POSTGRES_HOST:-192.168.60.110}
+      - PORT=${POSTGRES_PORT:-5432}
+      - USER=${POSTGRES_USER:-odoo}
+      - PASSWORD=${POSTGRES_PASSWORD} 
+      - DB_NAME=DB_NAME
+      - VIRTUAL_HOST=TENANT_NAME.arcweb.com.au
+      - VIRTUAL_PORT=8069
+      - PGSSLMODE=prefer
+      - DB_MAXCONN=2
+    command: ["odoo", "--without-demo=all", "--workers=2", "--proxy-mode", "--max-cron-threads=1"]
+    restart: always
+    networks:
+      - odoo-network
+      - nginx-network
 
-# TENANT_NAME Odoo server
-upstream odoo_TENANT_NAME {
-   server 127.0.0.1:PORT_NUMBER;
-}
-upstream odoochat_TENANT_NAME {
-   server 127.0.0.1:CHAT_PORT;
-}
+volumes:
+  odoo-TENANT_NAME-data:
 
-# HTTP redirect to HTTPS
-server {
-   listen 80;
-   server_name TENANT_NAME.arcweb.com.au;
-   
-   # Redirect to HTTPS
-   return 301 https://$host$request_uri;
-}
-
-# TENANT_NAME tenant (TENANT_NAME.arcweb.com.au)
-server {
-   listen 443 ssl http2;
-   server_name TENANT_NAME.arcweb.com.au;
-
-   ssl_certificate /etc/letsencrypt/live/arcweb.com.au/fullchain.pem;
-   ssl_certificate_key /etc/letsencrypt/live/arcweb.com.au/privkey.pem;
-
-   # log
-   access_log /var/log/nginx/TENANT_NAME.arcweb.com.au.access.log;
-   error_log /var/log/nginx/TENANT_
+networks:
+  odoo-network:
+    internal: true
+  nginx-network:
+    external: true
