@@ -30,8 +30,8 @@ We provide a comprehensive setup script that handles the entire installation pro
 ```bash
 git clone https://github.com/archostofficial/odoo-multi-tenant.git
 cd odoo-multi-tenant
-chmod +x setup/setup.sh
-sudo ./setup/setup.sh
+chmod +x install.sh
+sudo ./install.sh
 ```
 
 The setup script will guide you through:
