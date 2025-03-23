@@ -28,6 +28,7 @@ if [ -d "$TENANT_DIR" ]; then
 fi
 
 # Create directories
+mkdir -p "$TENANT_DIR"
 mkdir -p "$TENANT_DIR/18.0"
 mkdir -p "/opt/odoo-addons/tenant-specific/$TENANT"
 
@@ -101,14 +102,32 @@ EOCNF
 sed -i "s/TENANT_PLACEHOLDER/$TENANT/g" "$TENANT_DIR/18.0/odoo.conf"
 sed -i "s/DB_NAME_PLACEHOLDER/$DB_NAME/g" "$TENANT_DIR/18.0/odoo.conf"
 
-# Copy required files
+# Copy configuration file to build context root (needed for Docker build)
+cp "$TENANT_DIR/18.0/odoo.conf" "$TENANT_DIR/odoo.conf"
+
+# Copy Dockerfile from main instance
 cp /opt/odoo/Dockerfile "$TENANT_DIR/"
-cp /opt/odoo/entrypoint.sh "$TENANT_DIR/18.0/"
-cp /opt/odoo/wait-for-psql.py "$TENANT_DIR/18.0/"
+
+# Copy and prepare entrypoint script
+cp /opt/odoo/entrypoint.sh "$TENANT_DIR/entrypoint.sh"
+chmod +x "$TENANT_DIR/entrypoint.sh"
+
+# Copy wait-for-psql.py
+cp /opt/odoo/wait-for-psql.py "$TENANT_DIR/wait-for-psql.py"
+chmod +x "$TENANT_DIR/wait-for-psql.py"
+
+# Check if PostgreSQL client is installed
+if ! command -v psql &> /dev/null; then
+    echo "PostgreSQL client not found, installing..."
+    apt-get update
+    apt-get install -y postgresql-client
+fi
 
 # Create or replace the database
-PGPASSWORD=cnV2abjbDpbh64e12987wR4mj5kQ3456Y0Qf psql -h 192.168.60.110 -U odoo -c "DROP DATABASE IF EXISTS $DB_NAME;"
-PGPASSWORD=cnV2abjbDpbh64e12987wR4mj5kQ3456Y0Qf psql -h 192.168.60.110 -U odoo -c "CREATE DATABASE $DB_NAME OWNER odoo;"
+echo "Initializing database..."
+# Use docker to run PostgreSQL commands to ensure we have the client available
+docker run --rm postgres:latest psql "postgresql://odoo:cnV2abjbDpbh64e12987wR4mj5kQ3456Y0Qf@192.168.60.110:5432/postgres" -c "DROP DATABASE IF EXISTS $DB_NAME;" || echo "Failed to drop database, it may not exist."
+docker run --rm postgres:latest psql "postgresql://odoo:cnV2abjbDpbh64e12987wR4mj5kQ3456Y0Qf@192.168.60.110:5432/postgres" -c "CREATE DATABASE $DB_NAME OWNER odoo;" || echo "Failed to create database. Check PostgreSQL connection."
 
 # Create Nginx configuration file
 cat > "/etc/nginx/sites-available/$TENANT.arcweb.com.au.conf" << 'EONGINX'
@@ -199,16 +218,48 @@ sed -i "s/CHAT_PORT_PLACEHOLDER/$CHAT_PORT/g" "/etc/nginx/sites-available/$TENAN
 # Enable the site
 ln -sf "/etc/nginx/sites-available/$TENANT.arcweb.com.au.conf" /etc/nginx/sites-enabled/
 
+# Validate Nginx configuration
+nginx -t
+
 # Start the container
 echo "Starting the new tenant..."
 cd "$TENANT_DIR"
+docker-compose down || true  # Make sure any existing container is stopped
 docker-compose up -d
 
-echo "Initializing the database with essential modules..."
-docker-compose run --rm odoo-$TENANT odoo --init base,web,mail --database $DB_NAME --db_host 192.168.60.110 --db_port 5432 --db_user odoo --db_password cnV2abjbDpbh64e12987wR4mj5kQ3456Y0Qf --without-demo=all
+# Verify container is running
+echo "Verifying container is running..."
+sleep 5
+CONTAINER_RUNNING=$(docker-compose ps --services --filter "status=running" | grep "odoo-$TENANT")
+if [ -z "$CONTAINER_RUNNING" ]; then
+    echo "Warning: Container may not be running properly. Checking logs..."
+    docker-compose logs --tail=50
+    
+    echo "Attempting to restart container..."
+    docker-compose restart
+    
+    sleep 5
+    CONTAINER_RUNNING=$(docker-compose ps --services --filter "status=running" | grep "odoo-$TENANT")
+    if [ -z "$CONTAINER_RUNNING" ]; then
+        echo "Error: Container still not running. Please check logs for detailed error information."
+    else
+        echo "Container successfully restarted."
+    fi
+else
+    echo "Container is running properly."
+fi
 
-# Restart Nginx
-nginx -t && systemctl restart nginx
+echo "Initializing the database with essential modules..."
+# Add -i flag to initialize with full database creation instead of using existing database
+docker-compose run --rm odoo-$TENANT odoo -i base,web,mail -d $DB_NAME --db_host 192.168.60.110 --db_port 5432 --db_user odoo --db_password cnV2abjbDpbh64e12987wR4mj5kQ3456Y0Qf --without-demo=all --stop-after-init
+
+# Restart Nginx if configuration is valid
+if nginx -t; then
+    systemctl restart nginx
+    echo "Nginx configuration updated and restarted."
+else
+    echo "Warning: Nginx configuration test failed. Please check your configuration."
+fi
 
 echo "Tenant $TENANT has been created successfully!"
 echo "You can access it at https://$TENANT.arcweb.com.au"
