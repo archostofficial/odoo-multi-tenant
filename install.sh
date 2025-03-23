@@ -118,7 +118,7 @@ RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ noble-pgdg main' > /etc/a
 RUN npm install -g rtlcss
 
 # Install gevent for websocket support
-RUN pip3 install gevent
+RUN apt-get update && apt-get install -y python3-gevent && rm -rf /var/lib/apt/lists/*
 
 # Install Odoo
 ENV ODOO_VERSION 18.0
@@ -235,7 +235,7 @@ RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ noble-pgdg main' > /etc/a
 RUN npm install -g rtlcss
 
 # Install gevent for websocket support
-RUN pip3 install gevent
+RUN apt-get update && apt-get install -y python3-gevent && rm -rf /var/lib/apt/lists/*
 
 # Install Odoo
 ENV ODOO_VERSION 18.0
